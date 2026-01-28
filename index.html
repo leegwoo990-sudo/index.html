@@ -2,8 +2,8 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>카카오맵 반경 + 검색 + 저장</title>
-
+<title>카카오맵 반경 + 검색 + 저장 (GitHub Pages용)</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <style>
 html, body {
   width: 100%;
@@ -51,10 +51,17 @@ html, body {
   color:#ff3b3b;
   margin-left:4px;
 }
+
+.info-panel {
+  position:absolute;
+  right:10px;
+  top:10px;
+  z-index:20;
+}
 </style>
 </head>
 
-<body>
+<body class="bg-slate-900">
 
 <div id="map"></div>
 
@@ -69,6 +76,16 @@ html, body {
   <hr>
   <button onclick="toggleDraw()" id="drawBtn">반경 그리기 OFF</button>
   <button onclick="removeCircles()">반경 모두 삭제</button>
+</div>
+
+<!-- 오른쪽 상단: 저장 방식 설명 -->
+<div class="info-panel max-w-xs bg-white/95 text-xs text-slate-800 rounded-lg shadow-lg p-3 hidden md:block">
+  <p class="font-semibold mb-1">저장 방식 안내</p>
+  <ul class="list-disc list-inside space-y-1">
+    <li>반경을 만들거나 이동/삭제하면 <span class="font-mono">localStorage</span>에 자동 저장됩니다.</li>
+    <li>같은 브라우저에서 다시 접속하면 저장된 반경이 자동으로 복원됩니다.</li>
+    <li>"반경 모두 삭제" 버튼을 누르면 저장된 기록도 함께 지워집니다.</li>
+  </ul>
 </div>
 
 <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=ac34ac36d4448af73f238be750e1e0e7&libraries=services"></script>
@@ -106,6 +123,7 @@ function searchPlace(){
 
 /* ===== 반경 m 입력 후 클릭 생성 ===== */
 var clickRadiusMode = false;
+var clickRadiusBtn = document.getElementById('clickRadiusBtn');
 
 function enableClickRadius(){
   var r = parseInt(document.getElementById('radiusInput').value);
@@ -117,6 +135,8 @@ function enableClickRadius(){
 
 /* 반경 그리기 ON/OFF */
 var drawEnabled=false;
+var drawBtn = document.getElementById('drawBtn');
+
 function toggleDraw(){
   drawEnabled=!drawEnabled;
   drawBtn.innerText=drawEnabled?"반경 그리기 ON":"반경 그리기 OFF";
@@ -125,7 +145,8 @@ function toggleDraw(){
 /* 마우스로 반경 그리기 */
 var drawingFlag=false, centerPosition;
 var drawingLine, drawingCircle;
-var circles=[];
+var circles=[]; // {id, circle, overlay}
+var circleIdCounter = 0; // 고유 ID 발급용
 
 kakao.maps.event.addListener(map,'click',function(e){
 
@@ -172,10 +193,11 @@ kakao.maps.event.addListener(map,'rightclick',function(){
   saveCircles();
 });
 
-/* 반경 생성 + 드래그 + 개별삭제 */
-function createCircle(center,radius){
+/* 반경 생성 + 드래그 + 개별삭제 (ID 기반) */
+function createCircle(center,radius, id){
   var circle=new kakao.maps.Circle({
-    center,radius,
+    center:center,
+    radius:radius,
     strokeWeight:3,
     strokeColor:'#ff3b3b',
     fillColor:'#ff6b6b',
@@ -183,24 +205,25 @@ function createCircle(center,radius){
   });
   circle.setMap(map);
 
-  var idx = circles.length;
+  // 고유 ID 부여 (복원 시에는 전달된 id 사용)
+  var cid = (typeof id === 'number') ? id : circleIdCounter++;
 
   var overlay=new kakao.maps.CustomOverlay({
     position:center,
-    content:`<div class="radius-ui">
+    content:`<div class="radius-ui" data-circle-id="${cid}">
       ${Math.round(radius)}m
-      <button onclick="removeOne(${idx})">✕</button>
+      <button onclick="handleRemoveOne(${cid})">✕</button>
     </div>`,
     yAnchor:1
   });
   overlay.setMap(map);
 
-  enableDrag(circle,overlay);
-  circles.push({circle,overlay});
+  enableDrag(circle,overlay,cid);
+  circles.push({id: cid, circle: circle, overlay: overlay});
 }
 
-/* 드래그 이동 */
-function enableDrag(circle,overlay){
+/* 드래그 이동 (이동 시마다 저장) */
+function enableDrag(circle,overlay,cid){
   let dragging=false;
 
   kakao.maps.event.addListener(circle,'mousedown',()=>dragging=true);
@@ -214,9 +237,10 @@ function enableDrag(circle,overlay){
   });
 }
 
-/* 개별 삭제 */
-function removeOne(idx){
-  if(!circles[idx]) return;
+/* 개별 삭제: ID로 찾기 */
+function handleRemoveOne(id){
+  var idx = circles.findIndex(c => c.id === id);
+  if(idx === -1) return;
   circles[idx].circle.setMap(null);
   circles[idx].overlay.setMap(null);
   circles.splice(idx,1);
@@ -233,9 +257,10 @@ function removeCircles(){
   localStorage.removeItem('circles');
 }
 
-/* 저장 / 불러오기 */
+/* 저장 / 불러오기 (브라우저 localStorage 사용) */
 function saveCircles(){
   var data=circles.map(c=>({
+    id: c.id,
     lat:c.circle.getPosition().getLat(),
     lng:c.circle.getPosition().getLng(),
     r:c.circle.getRadius()
@@ -244,11 +269,30 @@ function saveCircles(){
 }
 
 function loadCircles(){
-  var data=JSON.parse(localStorage.getItem('circles')||'[]');
-  data.forEach(d=>{
-    createCircle(new kakao.maps.LatLng(d.lat,d.lng),d.r);
-  });
+  try {
+    var raw = localStorage.getItem('circles');
+    if(!raw) return;
+    var data=JSON.parse(raw);
+
+    // 기존 원 정리
+    circles.forEach(c=>{
+      c.circle.setMap(null);
+      c.overlay.setMap(null);
+    });
+    circles=[];
+
+    // 저장된 값으로 복원
+    data.forEach(d=>{
+      createCircle(new kakao.maps.LatLng(d.lat,d.lng),d.r, d.id);
+      if(typeof d.id === 'number' && d.id >= circleIdCounter){
+        circleIdCounter = d.id + 1;
+      }
+    });
+  } catch(e){
+    console.error('저장된 반경을 불러오는 중 오류:', e);
+  }
 }
+
 loadCircles();
 </script>
 
