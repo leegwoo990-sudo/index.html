@@ -98,6 +98,12 @@ var map = new kakao.maps.Map(document.getElementById('map'), {
   level: 4
 });
 
+// 지도 타입 변경 컨트롤을 생성한다
+var mapTypeControl = new kakao.maps.MapTypeControl();
+
+// 지도의 상단 우측에 지도 타입 변경 컨트롤을 추가한다
+map.addControl(mapTypeControl, kakao.maps.ControlPosition.TOPRIGHT);
+
 /* 검색 */
 var ps = new kakao.maps.services.Places();
 var searchMarkers = [];
@@ -228,38 +234,40 @@ function createCircle(center,radius, id){
 
 /* 드래그 이동 (원 + 텍스트 박스 모두 드래그 가능하게) */
 function enableDrag(circle,overlay,cid,contentEl){
-  let dragging=false;
+  // 공통 상태
+  let isDragging = false;
 
-  // 원을 직접 드래그
-  kakao.maps.event.addListener(circle,'mousedown',()=>dragging=true);
-  kakao.maps.event.addListener(map,'mouseup',()=>dragging=false);
+  // 드래그 시작 / 종료 헬퍼
+  function startDrag(){
+    isDragging = true;
+  }
+  function endDrag(){
+    isDragging = false;
+  }
 
-  kakao.maps.event.addListener(map,'mousemove',e=>{
-    if(!dragging) return;
+  // 원을 직접 드래그 (원 클릭 범위가 좁을 수 있어서, 이벤트만 유지)
+  kakao.maps.event.addListener(circle,'mousedown', startDrag);
+
+  // 맵 위에서 마우스를 떼면 드래그 종료
+  kakao.maps.event.addListener(map,'mouseup', endDrag);
+
+  // 윈도우 어디서든 마우스를 떼면 드래그 종료 (맵 밖으로 나가도 끊김 방지)
+  window.addEventListener('mouseup', endDrag);
+
+  // 드래그 중일 때 위치 갱신
+  kakao.maps.event.addListener(map,'mousemove', function(e){
+    if(!isDragging) return;
     circle.setPosition(e.latLng);
     overlay.setPosition(e.latLng);
     saveCircles();
   });
 
-  // 텍스트 박스를 드래그 핸들로 사용 (마우스로 박스를 끌어도 이동)
-  let overlayDragging = false;
-
+  // 텍스트 박스를 드래그 핸들로 사용
   contentEl.addEventListener('mousedown', function(ev){
     // 삭제 버튼을 눌렀을 때는 드래그 시작하지 않음
     if (ev.target && ev.target.getAttribute('data-remove-id')) return;
-    overlayDragging = true;
+    startDrag();
     ev.preventDefault();
-  });
-
-  window.addEventListener('mouseup', function(){
-    overlayDragging = false;
-  });
-
-  kakao.maps.event.addListener(map, 'mousemove', function(e){
-    if (!overlayDragging) return;
-    circle.setPosition(e.latLng);
-    overlay.setPosition(e.latLng);
-    saveCircles();
   });
 
   // 삭제 버튼 클릭 핸들링
