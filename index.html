@@ -139,6 +139,11 @@ var drawBtn = document.getElementById('drawBtn');
 
 function toggleDraw(){
   drawEnabled=!drawEnabled;
+  // 반경 그리기가 켜질 때 다각형 모드는 자동으로 OFF
+  if (drawEnabled && polygonModeEnabled){
+    polygonModeEnabled = false;
+    document.getElementById('polyToggleBtn').innerText = '다각형 모드 OFF';
+  }
   drawBtn.innerText=drawEnabled?"반경 그리기 ON":"반경 그리기 OFF";
 }
 
@@ -295,6 +300,7 @@ var drawingPolyFlag = false; // 다각형 그리기 상태
 var drawingPolygon;          // 그려지고 있는 다각형
 var polygon;                 // 완성된 다각형
 var areaOverlay;             // 면적 정보 표시용 오버레이
+var polygonDeleteOverlay;    // 다각형 개별 삭제 버튼 오버레이
 
 // 지도 클릭: 다각형 그리기 시작/연장
 kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
@@ -314,6 +320,10 @@ kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
     if (areaOverlay) {
       areaOverlay.setMap(null);
       areaOverlay = null;
+    }
+    if (polygonDeleteOverlay){
+      polygonDeleteOverlay.setMap(null);
+      polygonDeleteOverlay = null;
     }
 
     // 그려지고 있는 다각형
@@ -392,6 +402,27 @@ kakao.maps.event.addListener(map, 'rightclick', function (mouseEvent) {
         position: path[path.length-1]
       });
 
+      // 다각형 개별 삭제 버튼 오버레이 생성 (중심 위치에)
+      var bounds = new kakao.maps.LatLngBounds();
+      path.forEach(function(p){ bounds.extend(p); });
+      var center = bounds.getCenter();
+      var delContent = document.createElement('div');
+      delContent.className = 'radius-ui';
+      delContent.innerHTML = '다각형 삭제 <button type="button">✕</button>';
+
+      delContent.addEventListener('click', function(){
+        if (polygon){ polygon.setMap(null); polygon = null; }
+        if (areaOverlay){ areaOverlay.setMap(null); areaOverlay = null; }
+        if (polygonDeleteOverlay){ polygonDeleteOverlay.setMap(null); polygonDeleteOverlay = null; }
+      });
+
+      polygonDeleteOverlay = new kakao.maps.CustomOverlay({
+        map: map,
+        content: delContent,
+        position: center,
+        yAnchor: 1
+      });
+
     } else {
       polygon = null;
     }
@@ -403,14 +434,15 @@ kakao.maps.event.addListener(map, 'rightclick', function (mouseEvent) {
 // ===== 기능 토글 함수들 =====
 function togglePolygonMode(){
   polygonModeEnabled = !polygonModeEnabled;
+
+  // 다각형 모드가 켜지면 반경 그리기는 자동으로 OFF
+  if (polygonModeEnabled && drawEnabled){
+    drawEnabled = false;
+    drawBtn.innerText = '반경 그리기 OFF';
+  }
+
   var btn = document.getElementById('polyToggleBtn');
   btn.innerText = polygonModeEnabled ? '다각형 모드 ON' : '다각형 모드 OFF';
-}
-
-function toggleRoadviewFollow(){
-  roadviewFollowEnabled = !roadviewFollowEnabled;
-  var btn = document.getElementById('rvToggleBtn');
-  btn.innerText = roadviewFollowEnabled ? '로드뷰 연동 ON' : '로드뷰 연동 OFF';
 }
 </script>
 
