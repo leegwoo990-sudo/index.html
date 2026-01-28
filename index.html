@@ -73,6 +73,13 @@ html, body {
   <hr>
   <button onclick="toggleDraw()" id="drawBtn">반경 그리기 OFF</button>
   <button onclick="removeCircles()">반경 모두 삭제</button>
+
+  <hr>
+  <!-- 기능 토글 아이콘 버튼들 -->
+  <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">
+    <button id="polyToggleBtn" onclick="togglePolygonMode()">다각형 모드 OFF</button>
+    <button id="rvToggleBtn" onclick="toggleRoadviewFollow()">로드뷰 연동 ON</button>
+  </div>
 </div>
 
 <!-- 로드뷰 영역 -->
@@ -99,6 +106,9 @@ var mapTypeControl = new kakao.maps.MapTypeControl();
 // 지도의 상단 우측에 지도 타입 변경 컨트롤을 추가한다
 map.addControl(mapTypeControl, kakao.maps.ControlPosition.TOPRIGHT);
 
+// 로드뷰 연동 모드 플래그 (ON/OFF)
+var roadviewFollowEnabled = true;
+
 // ===== 로드뷰 토글 설정 =====
 var rvContainer = document.getElementById('roadview');
 var rv = new kakao.maps.Roadview(rvContainer);
@@ -124,11 +134,13 @@ var rvMarker = new kakao.maps.Marker({
 });
 
 kakao.maps.event.addListener(rvMarker, 'dragend', function(mouseEvent) {
+  if (!roadviewFollowEnabled) return;
   var position = rvMarker.getPosition();
   toggleRoadview(position);
 });
 
 kakao.maps.event.addListener(map, 'click', function(mouseEvent){
+  if (!roadviewFollowEnabled) return;
   var position = mouseEvent.latLng;
   rvMarker.setPosition(position);
   toggleRoadview(position);
@@ -373,6 +385,7 @@ function removeCircles(){
 // 원 반경 기능과 별도로, 지도 클릭으로 다각형을 그리고
 // 우클릭으로 면적(m²)을 표시하는 기능입니다.
 
+var polygonModeEnabled = false; // 다각형 모드 토글 플래그
 var drawingPolyFlag = false; // 다각형 그리기 상태
 var drawingPolygon;          // 그려지고 있는 다각형
 var polygon;                 // 완성된 다각형
@@ -381,7 +394,7 @@ var areaOverlay;             // 면적 정보 표시용 오버레이
 // 지도 클릭: 다각형 그리기 시작/연장
 kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
   // 기존 원 반경 드로잉 중이면 다각형 드로잉은 시작하지 않음
-  if (drawingFlag) return;
+  if (drawingFlag || !polygonModeEnabled) return;
 
   var clickPosition = mouseEvent.latLng;
 
@@ -481,6 +494,19 @@ kakao.maps.event.addListener(map, 'rightclick', function (mouseEvent) {
 
   drawingPolyFlag = false;
 });
+
+// ===== 기능 토글 함수들 =====
+function togglePolygonMode(){
+  polygonModeEnabled = !polygonModeEnabled;
+  var btn = document.getElementById('polyToggleBtn');
+  btn.innerText = polygonModeEnabled ? '다각형 모드 ON' : '다각형 모드 OFF';
+}
+
+function toggleRoadviewFollow(){
+  roadviewFollowEnabled = !roadviewFollowEnabled;
+  var btn = document.getElementById('rvToggleBtn');
+  btn.innerText = roadviewFollowEnabled ? '로드뷰 연동 ON' : '로드뷰 연동 OFF';
+}
 </script>
 
 </body>
