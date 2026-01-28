@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>카카오맵 반경 + 검색 + 저장 (GitHub Pages용)</title>
+<title>카카오맵 반경 + 검색 (GitHub Pages용)</title>
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <style>
 html, body {
@@ -52,13 +52,6 @@ html, body {
   color:#ff3b3b;
   margin-left:4px;
 }
-
-.info-panel {
-  position:absolute;
-  right:10px;
-  top:10px;
-  z-index:20;
-}
 </style>
 </head>
 
@@ -79,15 +72,8 @@ html, body {
   <button onclick="removeCircles()">반경 모두 삭제</button>
 </div>
 
-<!-- 오른쪽 상단: 저장 방식 설명 -->
-<div class="info-panel max-w-xs bg-white/95 text-xs text-slate-800 rounded-lg shadow-lg p-3 hidden md:block">
-  <p class="font-semibold mb-1">저장 방식 안내</p>
-  <ul class="list-disc list-inside space-y-1">
-    <li>반경을 만들거나 이동/삭제하면 <span class="font-mono">localStorage</span>에 자동 저장됩니다.</li>
-    <li>같은 브라우저에서 다시 접속하면 저장된 반경이 자동으로 복원됩니다.</li>
-    <li>"반경 모두 삭제" 버튼을 누르면 저장된 기록도 함께 지워집니다.</li>
-  </ul>
-</div>
+<!-- 로드뷰 영역 -->
+<div id="roadview" style="position:absolute; right:10px; bottom:10px; width:320px; height:200px; z-index:15; border-radius:8px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>
 
 <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=ac34ac36d4448af73f238be750e1e0e7&libraries=services"></script>
 
@@ -103,6 +89,62 @@ var mapTypeControl = new kakao.maps.MapTypeControl();
 
 // 지도의 상단 우측에 지도 타입 변경 컨트롤을 추가한다
 map.addControl(mapTypeControl, kakao.maps.ControlPosition.TOPRIGHT);
+
+// 지도에 선(폴리라인)을 표시한다
+var polyline = new kakao.maps.Polyline({
+  map: map,
+  path: [
+    new kakao.maps.LatLng(37.56700, 126.97280),
+    new kakao.maps.LatLng(37.56900, 126.97480),
+    new kakao.maps.LatLng(37.56900, 126.97280)
+  ],
+  strokeWeight: 3,
+  strokeColor: '#FF0000',
+  strokeOpacity: 0.9,
+  strokeStyle: 'solid'
+});
+
+// 폴리라인 이벤트
+kakao.maps.event.addListener(polyline, 'mouseover', function() {
+  console.log('도형에 mouseover 이벤트가 발생했습니다!');
+});
+
+kakao.maps.event.addListener(polyline, 'mouseout', function() {
+  console.log('도형에 mouseout 이벤트가 발생했습니다!');
+});
+
+kakao.maps.event.addListener(polyline, 'mousedown', function() {
+  console.log('도형에 mousedown 이벤트가 발생했습니다!');
+});
+
+// 로드뷰 설정
+var roadviewContainer = document.getElementById('roadview');
+var rvPosition = new kakao.maps.LatLng(37.56613, 126.97837);
+
+var roadview = new kakao.maps.Roadview(roadviewContainer, {
+  panoId : 1050215190,
+  panoX : 126.97837,
+  panoY : 37.56613,
+  pan: 68,
+  tilt: 1,
+  zoom: -1
+});
+
+kakao.maps.event.addListener(roadview, 'init', function() {
+  console.log('로드뷰 초기화가 완료되었습니다');
+});
+
+kakao.maps.event.addListener(roadview, 'panoid_changed', function() {
+  console.log('로드뷰의 파노라마 ID가 변경되었습니다');
+});
+
+kakao.maps.event.addListener(roadview, 'viewpoint_changed', function() {
+  console.log('로드뷰 시점이 변경되었습니다');
+});
+
+kakao.maps.event.addListener(roadview, 'position_changed', function() {
+  console.log('로드뷰 좌표가 변경되었습니다');
+});
 
 /* 검색 */
 var ps = new kakao.maps.services.Places();
@@ -161,7 +203,6 @@ kakao.maps.event.addListener(map,'click',function(e){
   if(clickRadiusMode){
     var r = parseInt(document.getElementById('radiusInput').value);
     createCircle(e.latLng, r);
-    saveCircles();
 
     clickRadiusMode = false;
     clickRadiusBtn.innerText = "반경 생성";
@@ -197,7 +238,6 @@ kakao.maps.event.addListener(map,'rightclick',function(){
   drawingCircle.setMap(null);
   drawingLine.setMap(null);
   drawingFlag=false;
-  saveCircles();
 });
 
 /* 반경 생성 + 드래그 + 개별삭제 (ID 기반) */
@@ -259,7 +299,6 @@ function enableDrag(circle,overlay,cid,contentEl){
     if(!isDragging) return;
     circle.setPosition(e.latLng);
     overlay.setPosition(e.latLng);
-    saveCircles();
   });
 
   // 텍스트 박스를 드래그 핸들로 사용
@@ -285,7 +324,6 @@ function handleRemoveOne(id){
   circles[idx].circle.setMap(null);
   circles[idx].overlay.setMap(null);
   circles.splice(idx,1);
-  saveCircles();
 }
 
 /* 전체 삭제 */
@@ -295,46 +333,7 @@ function removeCircles(){
     c.overlay.setMap(null);
   });
   circles=[];
-  localStorage.removeItem('circles');
 }
-
-/* 저장 / 불러오기 (브라우저 localStorage 사용) */
-function saveCircles(){
-  var data=circles.map(c=>({
-    id: c.id,
-    lat:c.circle.getPosition().getLat(),
-    lng:c.circle.getPosition().getLng(),
-    r:c.circle.getRadius()
-  }));
-  localStorage.setItem('circles',JSON.stringify(data));
-}
-
-function loadCircles(){
-  try {
-    var raw = localStorage.getItem('circles');
-    if(!raw) return;
-    var data=JSON.parse(raw);
-
-    // 기존 원 정리
-    circles.forEach(c=>{
-      c.circle.setMap(null);
-      c.overlay.setMap(null);
-    });
-    circles=[];
-
-    // 저장된 값으로 복원
-    data.forEach(d=>{
-      createCircle(new kakao.maps.LatLng(d.lat,d.lng),d.r, d.id);
-      if(typeof d.id === 'number' && d.id >= circleIdCounter){
-        circleIdCounter = d.id + 1;
-      }
-    });
-  } catch(e){
-    console.error('저장된 반경을 불러오는 중 오류:', e);
-  }
-}
-
-loadCircles();
 </script>
 
 </body>
