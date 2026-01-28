@@ -376,7 +376,7 @@ kakao.maps.event.addListener(map, 'mousemove', function (mouseEvent) {
   drawingPolygon.setPath(path);
 });
 
-// 지도 우클릭: 다각형 그리기 종료 + 면적 표시
+// 지도 우클릭: 다각형 그리기 종료 + 면적 표시 + 삭제 박스 생성
 kakao.maps.event.addListener(map, 'rightclick', function (mouseEvent) {
   if (!drawingPolyFlag) return;
 
@@ -394,6 +394,12 @@ kakao.maps.event.addListener(map, 'rightclick', function (mouseEvent) {
       var area = Math.round(polygon.getArea());
       var content = '<div class="info">총면적 <span class="number">' + area + '</span> m<sup>2</sup></div>';
 
+      // 면적 표시 오버레이가 이미 있다면 제거
+      if (areaOverlay) {
+        areaOverlay.setMap(null);
+        areaOverlay = null;
+      }
+
       areaOverlay = new kakao.maps.CustomOverlay({
         map: map,
         content: content,
@@ -401,6 +407,12 @@ kakao.maps.event.addListener(map, 'rightclick', function (mouseEvent) {
         yAnchor: 0,
         position: path[path.length-1]
       });
+
+      // 기존 삭제 오버레이 제거
+      if (polygonDeleteOverlay) {
+        polygonDeleteOverlay.setMap(null);
+        polygonDeleteOverlay = null;
+      }
 
       // 다각형 개별 삭제 버튼 오버레이 생성 (중심 위치에)
       var bounds = new kakao.maps.LatLngBounds();
