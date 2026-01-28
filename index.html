@@ -90,32 +90,6 @@ var mapTypeControl = new kakao.maps.MapTypeControl();
 // 지도의 상단 우측에 지도 타입 변경 컨트롤을 추가한다
 map.addControl(mapTypeControl, kakao.maps.ControlPosition.TOPRIGHT);
 
-// 지도에 선(폴리라인)을 표시한다
-var polyline = new kakao.maps.Polyline({
-  map: map,
-  path: [
-    new kakao.maps.LatLng(37.56700, 126.97280),
-    new kakao.maps.LatLng(37.56900, 126.97480),
-    new kakao.maps.LatLng(37.56900, 126.97280)
-  ],
-  strokeWeight: 3,
-  strokeColor: '#FF0000',
-  strokeOpacity: 0.9,
-  strokeStyle: 'solid'
-});
-
-// 폴리라인 이벤트
-kakao.maps.event.addListener(polyline, 'mouseover', function() {
-  console.log('도형에 mouseover 이벤트가 발생했습니다!');
-});
-
-kakao.maps.event.addListener(polyline, 'mouseout', function() {
-  console.log('도형에 mouseout 이벤트가 발생했습니다!');
-});
-
-kakao.maps.event.addListener(polyline, 'mousedown', function() {
-  console.log('도형에 mousedown 이벤트가 발생했습니다!');
-});
 
 // 로드뷰 설정
 var roadviewContainer = document.getElementById('roadview');
@@ -334,6 +308,119 @@ function removeCircles(){
   });
   circles=[];
 }
+
+// ===== 다각형(면적) 그리기 기능 추가 =====
+// 원 반경 기능과 별도로, 지도 클릭으로 다각형을 그리고
+// 우클릭으로 면적(m²)을 표시하는 기능입니다.
+
+var drawingPolyFlag = false; // 다각형 그리기 상태
+var drawingPolygon;          // 그려지고 있는 다각형
+var polygon;                 // 완성된 다각형
+var areaOverlay;             // 면적 정보 표시용 오버레이
+
+// 지도 클릭: 다각형 그리기 시작/연장
+kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
+  // 기존 원 반경 드로잉 중이면 다각형 드로잉은 시작하지 않음
+  if (drawingFlag) return;
+
+  var clickPosition = mouseEvent.latLng;
+
+  if (!drawingPolyFlag) {
+    drawingPolyFlag = true;
+
+    // 기존 다각형 / 면적 표시 제거
+    if (polygon) {
+      polygon.setMap(null);
+      polygon = null;
+    }
+    if (areaOverlay) {
+      areaOverlay.setMap(null);
+      areaOverlay = null;
+    }
+
+    // 그려지고 있는 다각형
+    drawingPolygon = new kakao.maps.Polygon({
+      map: map,
+      path: [clickPosition],
+      strokeWeight: 3,
+      strokeColor: '#00a0e9',
+      strokeOpacity: 1,
+      strokeStyle: 'solid',
+      fillColor: '#00a0e9',
+      fillOpacity: 0.2
+    });
+
+    // 완성된 다각형
+    polygon = new kakao.maps.Polygon({
+      path: [clickPosition],
+      strokeWeight: 3,
+      strokeColor: '#00a0e9',
+      strokeOpacity: 1,
+      strokeStyle: 'solid',
+      fillColor: '#00a0e9',
+      fillOpacity: 0.2
+    });
+
+  } else {
+    // 좌표 추가
+    var drawingPath = drawingPolygon.getPath();
+    drawingPath.push(clickPosition);
+    drawingPolygon.setPath(drawingPath);
+
+    var path = polygon.getPath();
+    path.push(clickPosition);
+    polygon.setPath(path);
+  }
+});
+
+// 지도 마우스무브: 그려질 다각형의 마지막 꼭짓점을 마우스 위치로 보여줌
+kakao.maps.event.addListener(map, 'mousemove', function (mouseEvent) {
+  if (!drawingPolyFlag) return;
+
+  var mousePosition = mouseEvent.latLng;
+  var path = drawingPolygon.getPath();
+
+  if (path.length > 1) {
+    path.pop();
+  }
+
+  path.push(mousePosition);
+  drawingPolygon.setPath(path);
+});
+
+// 지도 우클릭: 다각형 그리기 종료 + 면적 표시
+kakao.maps.event.addListener(map, 'rightclick', function (mouseEvent) {
+  if (!drawingPolyFlag) return;
+
+  if (drawingPolygon) {
+    drawingPolygon.setMap(null);
+    drawingPolygon = null;
+  }
+
+  if (polygon) {
+    var path = polygon.getPath();
+
+    if (path.length > 2) {
+      polygon.setMap(map);
+
+      var area = Math.round(polygon.getArea());
+      var content = '<div class="info">총면적 <span class="number">' + area + '</span> m<sup>2</sup></div>';
+
+      areaOverlay = new kakao.maps.CustomOverlay({
+        map: map,
+        content: content,
+        xAnchor: 0,
+        yAnchor: 0,
+        position: path[path.length-1]
+      });
+
+    } else {
+      polygon = null;
+    }
+  }
+
+  drawingPolyFlag = false;
+});
 </script>
 
 </body>
