@@ -298,31 +298,34 @@ function removeCircles(){
   saveState();
 }
 
-// ===== 다각형(면적) 그리기 기능 추가 =====
-// 원 반경 기능과 별도로, 지도 클릭으로 다각형을 그리고
-// 우클릭으로 면적(m²)을 표시하는 기능입니다.
+// ===== 다각형(면적) 그리기 기능 (원과 비슷한 로직) =====
+// - 다각형도 로컬에 저장/복원
+// - 중앙에 삭제 X 박스 제공
+// - 반경 그리기와 다각형 모드는 동시에 켜지지 않음
 
 var polygonModeEnabled = false;   // 다각형 모드 토글 플래그
-var drawingPoly = false;          // 다각형 그리기 상태
-var drawingPolygon = null;        // 그려지고 있는 다각형
+var polyDrawing = false;          // 다각형 그리기 상태
+var polyDraft = null;             // 그려지고 있는 임시 다각형
 var polygon = null;               // 완성된 다각형
 var areaOverlay = null;           // 면적 정보 오버레이
 var polygonDeleteOverlay = null;  // 다각형 삭제 버튼 오버레이
 
-// 다각형 삭제 처리 공통 함수
+// 다각형/관련 오버레이 전체 제거
 function clearPolygon() {
-  if (polygon) { polygon.setMap(null); polygon = null; }
+  if (polyDraft) { polyDraft.setMap(null); polyDraft = null; }
+  if (polygon)   { polygon.setMap(null);   polygon = null;   }
   if (areaOverlay) { areaOverlay.setMap(null); areaOverlay = null; }
   if (polygonDeleteOverlay) { polygonDeleteOverlay.setMap(null); polygonDeleteOverlay = null; }
-  saveState(); // 상태 저장 (다각형 삭제 반영)
 }
 
-// 다각형 UI 생성 (면적 + 삭제 버튼)
+// 다각형 UI 생성 (면적 + 중앙 삭제 버튼)
 function showPolygonUI(path) {
-  // 면적 계산 및 표시
+  if (!polygon || !path || path.length < 3) return;
+
+  // 면적 계산
   var area = Math.round(polygon.getArea());
 
-  // 총면적 오버레이: 클릭 완전 무시 (pointer-events:none + 커서 기본)
+  // 면적 오버레이 (완전 비인터랙티브)
   var infoDiv = document.createElement('div');
   infoDiv.className = 'info';
   infoDiv.style.pointerEvents = 'none';
@@ -330,7 +333,6 @@ function showPolygonUI(path) {
   infoDiv.innerHTML = '총면적 <span class="number">' + area + '</span> m<sup>2</sup>';
 
   if (areaOverlay) { areaOverlay.setMap(null); areaOverlay = null; }
-
   areaOverlay = new kakao.maps.CustomOverlay({
     map: map,
     content: infoDiv,
@@ -339,23 +341,20 @@ function showPolygonUI(path) {
     position: path[path.length - 1]
   });
 
-  // 기존 삭제 오버레이 제거
-  if (polygonDeleteOverlay) {
-    polygonDeleteOverlay.setMap(null);
-    polygonDeleteOverlay = null;
-  }
-
-  // 다각형 중심 계산 후 삭제 박스 생성
+  // 중심 좌표 계산
+  if (polygonDeleteOverlay) { polygonDeleteOverlay.setMap(null); polygonDeleteOverlay = null; }
   var bounds = new kakao.maps.LatLngBounds();
-  path.forEach(function (p) { bounds.extend(p); });
+  path.forEach(function(p){ bounds.extend(p); });
   var center = bounds.getCenter();
 
+  // 삭제 박스 생성 (원 반경 UI와 동일 스타일)
   var delContent = document.createElement('div');
   delContent.className = 'radius-ui';
   delContent.innerHTML = '다각형 삭제 <button type="button">✕</button>';
   delContent.style.cursor = 'pointer';
-  delContent.addEventListener('click', function () {
+  delContent.addEventListener('click', function(){
     clearPolygon();
+    saveState();
   });
 
   polygonDeleteOverlay = new kakao.maps.CustomOverlay({
@@ -366,21 +365,21 @@ function showPolygonUI(path) {
   });
 }
 
-// 지도 클릭: 다각형 그리기 시작/연장
-kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
-  // 반경 드로잉 중이거나 다각형 모드가 꺼져 있으면 무시
-  if (drawingFlag || !polygonModeEnabled) return;
+// 지도 클릭: 다각형 그리기 시작/연장 (원 그리기와 공존 방지)
+kakao.maps.event.addListener(map, 'click', function(mouseEvent){
+  if (!polygonModeEnabled) return;   // 모드 꺼져 있으면 무시
+  if (drawingFlag) return;           // 원 그리기 중이면 무시
 
   var clickPosition = mouseEvent.latLng;
 
-  if (!drawingPoly) {
-    drawingPoly = true;
+  if (!polyDrawing) {
+    polyDrawing = true;
 
-    // 기존 다각형 / 면적 / 삭제 박스 제거
+    // 이전 다각형/오버레이 제거
     clearPolygon();
 
-    // 그려지고 있는 다각형
-    drawingPolygon = new kakao.maps.Polygon({
+    // 임시 다각형 (마우스 따라다니는 선)
+    polyDraft = new kakao.maps.Polygon({
       map: map,
       path: [clickPosition],
       strokeWeight: 3,
@@ -391,7 +390,7 @@ kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
       fillOpacity: 0.2
     });
 
-    // 완성될 다각형
+    // 완성될 실제 다각형
     polygon = new kakao.maps.Polygon({
       path: [clickPosition],
       strokeWeight: 3,
@@ -403,10 +402,10 @@ kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
     });
 
   } else {
-    // 좌표 추가
-    var drawingPath = drawingPolygon.getPath();
-    drawingPath.push(clickPosition);
-    drawingPolygon.setPath(drawingPath);
+    // 경로에 좌표 추가
+    var draftPath = polyDraft.getPath();
+    draftPath.push(clickPosition);
+    polyDraft.setPath(draftPath);
 
     var path = polygon.getPath();
     path.push(clickPosition);
@@ -414,71 +413,57 @@ kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
   }
 });
 
-// 지도 마우스무브: 그려질 다각형의 마지막 꼭짓점을 마우스 위치로 보여줌
-kakao.maps.event.addListener(map, 'mousemove', function (mouseEvent) {
-  if (!drawingPoly || !drawingPolygon) return;
+// 마우스무브: 임시 다각형의 마지막 꼭짓점을 마우스 위치로 이동
+kakao.maps.event.addListener(map, 'mousemove', function(mouseEvent){
+  if (!polyDrawing || !polyDraft) return;
 
   var mousePosition = mouseEvent.latLng;
-  var path = drawingPolygon.getPath();
+  var path = polyDraft.getPath();
 
-  if (path.length > 1) {
-    path.pop();
-  }
-
+  if (path.length > 1) path.pop();
   path.push(mousePosition);
-  drawingPolygon.setPath(path);
+  polyDraft.setPath(path);
 });
 
-// 지도 우클릭: 다각형 그리기 종료 + 면적 표시 + 삭제 박스 생성
-kakao.maps.event.addListener(map, 'rightclick', function () {
-  if (!drawingPoly) return;
+// 우클릭: 다각형 그리기 종료 + UI 생성 + 저장
+kakao.maps.event.addListener(map, 'rightclick', function(){
+  if (!polyDrawing) return;
 
-  // 임시 그리기용 다각형 제거
-  if (drawingPolygon) {
-    drawingPolygon.setMap(null);
-    drawingPolygon = null;
-  }
+  if (polyDraft) { polyDraft.setMap(null); polyDraft = null; }
 
   if (polygon) {
     var path = polygon.getPath();
-
     if (path.length > 2) {
-      // 다각형 지도에 표시
       polygon.setMap(map);
-
-      // UI(면적 + 삭제 박스) 생성
       showPolygonUI(path);
-
-      // 상태 저장: 다각형 좌표도 함께 저장
       saveState();
     } else {
       clearPolygon();
+      saveState();
     }
   }
 
-  drawingPoly = false;
+  polyDrawing = false;
 });
 
 // ===== 기능 토글 함수들 =====
 function togglePolygonMode() {
   polygonModeEnabled = !polygonModeEnabled;
 
-  // 다각형 모드가 켜지면 반경 그리기는 자동으로 OFF
+  // 다각형 모드가 켜지면 원 반경 드로잉은 자동 OFF
   if (polygonModeEnabled && drawEnabled) {
     drawEnabled = false;
     drawBtn.innerText = '반경 그리기 OFF';
   }
 
   var btn = document.getElementById('polyToggleBtn');
-  if (btn) {
-    btn.innerText = polygonModeEnabled ? '다각형 모드 ON' : '다각형 모드 OFF';
-  }
+  if (btn) btn.innerText = polygonModeEnabled ? '다각형 모드 ON' : '다각형 모드 OFF';
 }
 
-// 원(circle) + 다각형 상태 저장/복원
+// 원(circle) + 다각형 상태 저장/복원 (localStorage)
 function saveState() {
   var state = {
-    circles: circles.map(function (c) {
+    circles: circles.map(function(c){
       return {
         id: c.id,
         lat: c.circle.getPosition().getLat(),
@@ -489,11 +474,10 @@ function saveState() {
     polygon: null
   };
 
-  // 다각형이 있으면 좌표 저장
   if (polygon && polygon.getPath) {
     var path = polygon.getPath();
     if (path && path.length > 2) {
-      state.polygon = path.map(function (p) {
+      state.polygon = path.map(function(p){
         return { lat: p.getLat(), lng: p.getLng() };
       });
     }
@@ -505,10 +489,9 @@ function saveState() {
 function restorePolygonFromState(pathCoords) {
   if (!pathCoords || !Array.isArray(pathCoords) || pathCoords.length < 3) return;
 
-  // 기존 다각형/오버레이 제거
   clearPolygon();
 
-  var path = pathCoords.map(function (d) {
+  var path = pathCoords.map(function(d){
     return new kakao.maps.LatLng(d.lat, d.lng);
   });
 
@@ -523,7 +506,6 @@ function restorePolygonFromState(pathCoords) {
   });
   polygon.setMap(map);
 
-  // UI(면적 + 삭제 박스) 생성
   showPolygonUI(path);
 }
 
@@ -533,8 +515,8 @@ function loadState() {
     if (!raw) return;
     var state = JSON.parse(raw);
 
-    // 기존 원 제거
-    circles.forEach(function (c) {
+    // 원 초기화
+    circles.forEach(function(c){
       c.circle.setMap(null);
       c.overlay.setMap(null);
     });
@@ -542,7 +524,7 @@ function loadState() {
 
     // 원 복원
     if (state.circles && Array.isArray(state.circles)) {
-      state.circles.forEach(function (d) {
+      state.circles.forEach(function(d){
         createCircle(new kakao.maps.LatLng(d.lat, d.lng), d.r, d.id);
         if (typeof d.id === 'number' && d.id >= circleIdCounter) {
           circleIdCounter = d.id + 1;
@@ -551,10 +533,8 @@ function loadState() {
     }
 
     // 다각형 복원
-    if (state.polygon) {
-      restorePolygonFromState(state.polygon);
-    }
-  } catch (e) {
+    if (state.polygon) restorePolygonFromState(state.polygon);
+  } catch(e) {
     console.error('저장된 상태 불러오기 오류:', e);
   }
 }
