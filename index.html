@@ -322,10 +322,11 @@ function showPolygonUI(path) {
   // 면적 계산 및 표시
   var area = Math.round(polygon.getArea());
 
-  // 총면적 오버레이: 클릭 막힘 방지 위해 pointer-events:none
+  // 총면적 오버레이: 클릭 완전 무시 (pointer-events:none + 커서 기본)
   var infoDiv = document.createElement('div');
   infoDiv.className = 'info';
   infoDiv.style.pointerEvents = 'none';
+  infoDiv.style.cursor = 'default';
   infoDiv.innerHTML = '총면적 <span class="number">' + area + '</span> m<sup>2</sup>';
 
   if (areaOverlay) { areaOverlay.setMap(null); areaOverlay = null; }
