@@ -476,11 +476,66 @@ function saveState(){
         r: c.circle.getRadius()
       };
     }),
-    polygon: (polygon && polygon.getPath().length > 2) ? polygon.getPath().map(function(p){
+    polygon: (polygon && polygon.getPath && polygon.getPath().length > 2) ? polygon.getPath().map(function(p){
       return { lat: p.getLat(), lng: p.getLng() };
     }) : null
   };
   localStorage.setItem('mapState', JSON.stringify(state));
+}
+
+function restorePolygonFromState(pathCoords){
+  // 기존 다각형 관련 요소 제거
+  if (polygon){ polygon.setMap(null); polygon = null; }
+  if (areaOverlay){ areaOverlay.setMap(null); areaOverlay = null; }
+  if (polygonDeleteOverlay){ polygonDeleteOverlay.setMap(null); polygonDeleteOverlay = null; }
+
+  var path = pathCoords.map(function(p){
+    return new kakao.maps.LatLng(p.lat, p.lng);
+  });
+
+  polygon = new kakao.maps.Polygon({
+    path: path,
+    strokeWeight: 3,
+    strokeColor: '#00a0e9',
+    strokeOpacity: 1,
+    strokeStyle: 'solid',
+    fillColor: '#00a0e9',
+    fillOpacity: 0.2
+  });
+  polygon.setMap(map);
+
+  var area = Math.round(polygon.getArea());
+  var content = '<div class="info">총면적 <span class="number">' + area + '</span> m<sup>2</sup></div>';
+  areaOverlay = new kakao.maps.CustomOverlay({
+    map: map,
+    content: content,
+    xAnchor: 0,
+    yAnchor: 0,
+    position: path[path.length-1]
+  });
+
+  // 다각형 중심에 삭제 박스 생성
+  var bounds = new kakao.maps.LatLngBounds();
+  path.forEach(function(p){ bounds.extend(p); });
+  var center = bounds.getCenter();
+
+  var delContent = document.createElement('div');
+  delContent.className = 'radius-ui';
+  delContent.innerHTML = '다각형 삭제 <button type="button">✕</button>';
+  delContent.addEventListener('click', function(){
+    if (polygon){ polygon.setMap(null); polygon = null; }
+    if (areaOverlay){ areaOverlay.setMap(null); areaOverlay = null; }
+    if (polygonDeleteOverlay){ polygonDeleteOverlay.setMap(null); polygonDeleteOverlay = null; }
+    // 다각형 삭제 후 상태 저장
+    saveState();
+  });
+
+  polygonDeleteOverlay = new kakao.maps.CustomOverlay({
+    map: map,
+    content: delContent,
+    position: center,
+    yAnchor: 1
+  });
 }
 
 function loadState(){
@@ -508,48 +563,7 @@ function loadState(){
 
     // 다각형 복원
     if(state.polygon && Array.isArray(state.polygon) && state.polygon.length > 2){
-      var path = state.polygon.map(function(p){
-        return new kakao.maps.LatLng(p.lat, p.lng);
-      });
-      polygon = new kakao.maps.Polygon({
-        path: path,
-        strokeWeight: 3,
-        strokeColor: '#00a0e9',
-        strokeOpacity: 1,
-        strokeStyle: 'solid',
-        fillColor: '#00a0e9',
-        fillOpacity: 0.2
-      });
-      polygon.setMap(map);
-
-      var area = Math.round(polygon.getArea());
-      var content = '<div class="info">총면적 <span class="number">' + area + '</span> m<sup>2</sup></div>';
-      areaOverlay = new kakao.maps.CustomOverlay({
-        map: map,
-        content: content,
-        xAnchor: 0,
-        yAnchor: 0,
-        position: path[path.length-1]
-      });
-
-      var bounds = new kakao.maps.LatLngBounds();
-      path.forEach(function(p){ bounds.extend(p); });
-      var center = bounds.getCenter();
-      var delContent = document.createElement('div');
-      delContent.className = 'radius-ui';
-      delContent.innerHTML = '다각형 삭제 <button type="button">✕</button>';
-      delContent.addEventListener('click', function(){
-        if (polygon){ polygon.setMap(null); polygon = null; }
-        if (areaOverlay){ areaOverlay.setMap(null); areaOverlay = null; }
-        if (polygonDeleteOverlay){ polygonDeleteOverlay.setMap(null); polygonDeleteOverlay = null; }
-        saveState();
-      });
-      polygonDeleteOverlay = new kakao.maps.CustomOverlay({
-        map: map,
-        content: delContent,
-        position: center,
-        yAnchor: 1
-      });
+      restorePolygonFromState(state.polygon);
     }
   }catch(e){
     console.error('저장된 상태 불러오기 오류:', e);
