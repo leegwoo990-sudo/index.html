@@ -2,8 +2,9 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>카카오맵 반경 + 검색 (GitHub Pages용)</title>
+<title>카카오맵 반경 + 검색 (최종본)</title>
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
 <style>
 html, body {
   width: 100%;
@@ -33,7 +34,6 @@ html, body {
   width: 150px;
   margin-top: 4px;
 }
-
 .radius-ui {
   background:#fff;
   border:1px solid #ccc;
@@ -41,7 +41,7 @@ html, body {
   padding:4px 8px;
   font-size:11px;
   white-space:nowrap;
-  cursor:move; /* 박스를 드래그 핸들로 사용 */
+  cursor:move;
   user-select:none;
 }
 .radius-ui button {
@@ -56,8 +56,7 @@ html, body {
 </head>
 
 <body class="bg-slate-900">
-
-<div id="map" style="width:100%; height:100%;"></div>
+<div id="map"></div>
 
 <div class="control-box">
   <input type="text" id="keyword" placeholder="장소 검색">
@@ -66,229 +65,201 @@ html, body {
 
   <input type="number" id="radiusInput" placeholder="반경 m 입력">
   <button onclick="enableClickRadius()" id="clickRadiusBtn">반경 생성</button>
-
   <hr>
+
   <button onclick="toggleDraw()" id="drawBtn">반경 그리기 OFF</button>
   <button onclick="removeCircles()">반경 모두 삭제</button>
-
   <hr>
-  <!-- 기능 토글 아이콘 버튼들 -->
-  <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">
-    <button id="polyToggleBtn" onclick="togglePolygonMode()">다각형 모드 OFF</button>
-  </div>
+
+  <button onclick="togglePolygonMode()" id="polyToggleBtn">다각형 모드 OFF</button>
 </div>
 
 <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=ac34ac36d4448af73f238be750e1e0e7&libraries=services"></script>
 
 <script>
-var mapContainer = document.getElementById('map'); // 지도를 표시할 div
-var mapCenter = new kakao.maps.LatLng(33.450422139819736 , 126.5709139924533); // 지도의 가운데 좌표
-var mapOption = {
-  center: mapCenter,
+/* ================= 지도 기본 ================= */
+const map = new kakao.maps.Map(document.getElementById('map'), {
+  center: new kakao.maps.LatLng(33.450422139819736,126.5709139924533),
   level: 3
-};
+});
+map.addControl(new kakao.maps.MapTypeControl(), kakao.maps.ControlPosition.TOPRIGHT);
 
-/* 지도 */
-var map = new kakao.maps.Map(mapContainer, mapOption);
-
-// 지도 타입 변경 컨트롤을 생성한다
-var mapTypeControl = new kakao.maps.MapTypeControl();
-
-// 지도의 상단 우측에 지도 타입 변경 컨트롤을 추가한다
-map.addControl(mapTypeControl, kakao.maps.ControlPosition.TOPRIGHT);
-
-/* 검색 */
-var ps = new kakao.maps.services.Places();
-var searchMarkers = [];
+/* ================= 검색 ================= */
+const ps = new kakao.maps.services.Places();
+let searchMarkers=[];
 
 function searchPlace(){
-  var keyword=document.getElementById('keyword').value.trim();
-  if(!keyword) return alert("검색어 입력");
+  const keyword=document.getElementById('keyword').value.trim();
+  if(!keyword) return alert('검색어 입력');
 
   searchMarkers.forEach(m=>m.setMap(null));
   searchMarkers=[];
 
-  ps.keywordSearch(keyword,function(data,status){
+  ps.keywordSearch(keyword,(data,status)=>{
     if(status!==kakao.maps.services.Status.OK) return;
-    var bounds=new kakao.maps.LatLngBounds();
+    const bounds=new kakao.maps.LatLngBounds();
     data.forEach(p=>{
-      var pos=new kakao.maps.LatLng(p.y,p.x);
+      const pos=new kakao.maps.LatLng(p.y,p.x);
       bounds.extend(pos);
-      var m=new kakao.maps.Marker({position:pos,map});
-      searchMarkers.push(m);
+      searchMarkers.push(new kakao.maps.Marker({map,position:pos}));
     });
     map.setBounds(bounds);
   });
 }
 
-/* ===== 반경 m 입력 후 클릭 생성 ===== */
-var clickRadiusMode = false;
-var clickRadiusBtn = document.getElementById('clickRadiusBtn');
+/* ================= 상태 ================= */
+let clickRadiusMode=false;
+let drawEnabled=false;
+let polygonMode=false;
 
-function enableClickRadius(){
-  var r = parseInt(document.getElementById('radiusInput').value);
-  if(!r || r<=0) return alert("반경(m)을 입력하세요");
+let drawing=false;
+let centerPos,line,tempCircle;
 
-  clickRadiusMode = true;
-  clickRadiusBtn.innerText = "지도 클릭 대기중...";
-}
+let circles=[];
+let circleId=0;
 
-/* 반경 그리기 ON/OFF */
-var drawEnabled=false;
-var drawBtn = document.getElementById('drawBtn');
+let polyDrawing=false;
+let polyDraft=null;
+let polygon=null;
+let polyDeleteOverlay=null;
 
-function toggleDraw(){
-  drawEnabled=!drawEnabled;
-  // 반경 그리기가 켜질 때 다각형 모드는 자동으로 OFF
-  if (drawEnabled && polygonModeEnabled){
-    polygonModeEnabled = false;
-    document.getElementById('polyToggleBtn').innerText = '다각형 모드 OFF';
-  }
-  drawBtn.innerText=drawEnabled?"반경 그리기 ON":"반경 그리기 OFF";
-}
-
-/* 마우스로 반경 그리기 */
-var drawingFlag=false, centerPosition;
-var drawingLine, drawingCircle;
-var circles=[]; // {id, circle, overlay}
-var circleIdCounter = 0; // 고유 ID 발급용
-
+/* ================= 클릭 통합 ================= */
 kakao.maps.event.addListener(map,'click',function(e){
 
-  /* 🔹 반경 입력 → 클릭 생성 */
+  /* 반경 입력 → 클릭 */
   if(clickRadiusMode){
-    var r = parseInt(document.getElementById('radiusInput').value);
-    createCircle(e.latLng, r);
-
-    clickRadiusMode = false;
-    clickRadiusBtn.innerText = "반경 생성";
+    const r=+radiusInput.value;
+    createCircle(e.latLng,r);
+    clickRadiusMode=false;
+    clickRadiusBtn.innerText='반경 생성';
     return;
   }
 
-  /* 🔹 마우스 드래그 반경 */
-  if(!drawEnabled||drawingFlag) return;
-  drawingFlag=true;
-  centerPosition=e.latLng;
-
-  drawingLine=new kakao.maps.Polyline({strokeWeight:3,strokeColor:'#ff3b3b'});
-  drawingCircle=new kakao.maps.Circle({
-    strokeWeight:3,strokeColor:'#ff3b3b',
-    fillColor:'#ff6b6b',fillOpacity:0.25
-  });
-});
-
-kakao.maps.event.addListener(map,'mousemove',function(e){
-  if(!drawingFlag) return;
-  drawingLine.setPath([centerPosition,e.latLng]);
-  var r=drawingLine.getLength();
-  if(r>0){
-    drawingCircle.setOptions({center:centerPosition,radius:r});
-    drawingCircle.setMap(map);
-    drawingLine.setMap(map);
+  /* 다각형 */
+  if(polygonMode){
+    handlePolygonClick(e.latLng);
+    return;
   }
-});
 
-kakao.maps.event.addListener(map,'rightclick',function(){
-  if(!drawingFlag) return;
-  createCircle(centerPosition,drawingLine.getLength());
-  drawingCircle.setMap(null);
-  drawingLine.setMap(null);
-  drawingFlag=false;
-  saveState();
-});
+  /* 드래그 반경 시작 */
+  if(!drawEnabled || drawing) return;
+  drawing=true;
+  centerPos=e.latLng;
 
-/* 반경 생성 + 드래그 + 개별삭제 (ID 기반) */
-function createCircle(center,radius, id){
-  var circle=new kakao.maps.Circle({
-    center:center,
-    radius:radius,
+  line=new kakao.maps.Polyline({strokeWeight:3,strokeColor:'#ff3b3b'});
+  tempCircle=new kakao.maps.Circle({
     strokeWeight:3,
     strokeColor:'#ff3b3b',
     fillColor:'#ff6b6b',
     fillOpacity:0.25
   });
-  circle.setMap(map);
+});
 
-  // 고유 ID 부여 (복원 시에는 전달된 id 사용)
-  var cid = (typeof id === 'number') ? id : circleIdCounter++;
+/* ================= 마우스 이동 ================= */
+kakao.maps.event.addListener(map,'mousemove',function(e){
+  if(drawing){
+    line.setPath([centerPos,e.latLng]);
+    const r=line.getLength();
+    if(r>0){
+      tempCircle.setOptions({center:centerPos,radius:r});
+      line.setMap(map);
+      tempCircle.setMap(map);
+    }
+  }
 
-  // 텍스트 박스를 드래그 핸들로 사용하기 위해 data 속성에 id 부여
-  var content = document.createElement('div');
-  content.className = 'radius-ui';
-  content.setAttribute('data-circle-id', cid);
-  content.innerHTML = `${Math.round(radius)}m <button type="button" data-remove-id="${cid}">✕</button>`;
+  if(polyDrawing && polyDraft){
+    const path=polyDraft.getPath();
+    if(path.length>1) path.pop();
+    path.push(e.latLng);
+    polyDraft.setPath(path);
+  }
+});
 
-  var overlay=new kakao.maps.CustomOverlay({
-    position:center,
-    content:content,
+/* ================= 우클릭 ================= */
+kakao.maps.event.addListener(map,'rightclick',function(){
+  if(drawing){
+    createCircle(centerPos,line.getLength());
+    line.setMap(null);
+    tempCircle.setMap(null);
+    drawing=false;
+  }
+
+  if(polyDrawing){
+    finishPolygon();
+  }
+});
+
+/* ================= 원 ================= */
+function enableClickRadius(){
+  if(!radiusInput.value) return alert('반경 입력');
+  clickRadiusMode=true;
+  clickRadiusBtn.innerText='지도 클릭 대기중...';
+}
+
+function toggleDraw(){
+  drawEnabled=!drawEnabled;
+  if(drawEnabled && polygonMode) togglePolygonMode();
+  drawBtn.innerText=drawEnabled?'반경 그리기 ON':'반경 그리기 OFF';
+}
+
+function createCircle(pos,r,id){
+  const cid=(id??circleId++);
+  const circle=new kakao.maps.Circle({
+    map,
+    center:pos,
+    radius:r,
+    strokeWeight:3,
+    strokeColor:'#ff3b3b',
+    fillColor:'#ff6b6b',
+    fillOpacity:0.25
+  });
+
+  const box=document.createElement('div');
+  box.className='radius-ui';
+  box.innerHTML=`${Math.round(r)}m <button>✕</button>`;
+
+  const overlay=new kakao.maps.CustomOverlay({
+    map,
+    position:pos,
+    content:box,
     yAnchor:1
   });
-  overlay.setMap(map);
 
-  enableDrag(circle,overlay,cid,content);
-  circles.push({id: cid, circle: circle, overlay: overlay});
-
-  // 생성 후 저장
+  enableDrag(circle,overlay,box,cid);
+  circles.push({id:cid,circle,overlay});
   saveState();
 }
 
-/* 드래그 이동 (원 + 텍스트 박스 모두 드래그 가능하게) */
-function enableDrag(circle,overlay,cid,contentEl){
-  // 공통 상태
-  let isDragging = false;
+function enableDrag(circle,overlay,box,id){
+  let drag=false;
 
-  // 드래그 시작 / 종료 헬퍼
-  function startDrag(){
-    isDragging = true;
-  }
-  function endDrag(){
-    isDragging = false;
-  }
+  kakao.maps.event.addListener(circle,'mousedown',()=>drag=true);
+  kakao.maps.event.addListener(map,'mouseup',()=>{
+    if(drag) saveState();
+    drag=false;
+  });
 
-  // 원을 직접 드래그 (원 클릭 범위가 좁을 수 있어서, 이벤트만 유지)
-  kakao.maps.event.addListener(circle,'mousedown', startDrag);
-
-  // 맵 위에서 마우스를 떼면 드래그 종료
-  kakao.maps.event.addListener(map,'mouseup', endDrag);
-
-  // 윈도우 어디서든 마우스를 떼면 드래그 종료 (맵 밖으로 나가도 끊김 방지)
-  window.addEventListener('mouseup', endDrag);
-
-  // 드래그 중일 때 위치 갱신
-  kakao.maps.event.addListener(map,'mousemove', function(e){
-    if(!isDragging) return;
+  kakao.maps.event.addListener(map,'mousemove',e=>{
+    if(!drag) return;
     circle.setPosition(e.latLng);
     overlay.setPosition(e.latLng);
+  });
+
+  box.addEventListener('mousedown',e=>{
+    if(e.target.tagName==='BUTTON') return;
+    drag=true;
+    e.preventDefault();
+  });
+
+  box.querySelector('button').onclick=()=>{
+    const i=circles.findIndex(c=>c.id===id);
+    circles[i].circle.setMap(null);
+    circles[i].overlay.setMap(null);
+    circles.splice(i,1);
     saveState();
-  });
-
-  // 텍스트 박스를 드래그 핸들로 사용
-  contentEl.addEventListener('mousedown', function(ev){
-    // 삭제 버튼을 눌렀을 때는 드래그 시작하지 않음
-    if (ev.target && ev.target.getAttribute('data-remove-id')) return;
-    startDrag();
-    ev.preventDefault();
-  });
-
-  // 삭제 버튼 클릭 핸들링
-  contentEl.addEventListener('click', function(ev){
-    var rid = ev.target && ev.target.getAttribute('data-remove-id');
-    if (!rid) return;
-    handleRemoveOne(parseInt(rid,10));
-  });
+  };
 }
 
-/* 개별 삭제: ID로 찾기 */
-function handleRemoveOne(id){
-  var idx = circles.findIndex(c => c.id === id);
-  if(idx === -1) return;
-  circles[idx].circle.setMap(null);
-  circles[idx].overlay.setMap(null);
-  circles.splice(idx,1);
-  saveState();
-}
-
-/* 전체 삭제 */
 function removeCircles(){
   circles.forEach(c=>{
     c.circle.setMap(null);
@@ -298,250 +269,96 @@ function removeCircles(){
   saveState();
 }
 
-// ===== 다각형(면적) 그리기 기능 (원과 비슷한 로직) =====
-// - 다각형도 로컬에 저장/복원
-// - 중앙에 삭제 X 박스 제공
-// - 반경 그리기와 다각형 모드는 동시에 켜지지 않음
-
-var polygonModeEnabled = false;   // 다각형 모드 토글 플래그
-var polyDrawing = false;          // 다각형 그리기 상태
-var polyDraft = null;             // 그려지고 있는 임시 다각형
-var polygon = null;               // 완성된 다각형
-var areaOverlay = null;           // 면적 정보 오버레이
-var polygonDeleteOverlay = null;  // 다각형 삭제 버튼 오버레이
-
-// 다각형/관련 오버레이 전체 제거
-function clearPolygon() {
-  if (polyDraft) { polyDraft.setMap(null); polyDraft = null; }
-  if (polygon)   { polygon.setMap(null);   polygon = null;   }
-  if (areaOverlay) { areaOverlay.setMap(null); areaOverlay = null; }
-  if (polygonDeleteOverlay) { polygonDeleteOverlay.setMap(null); polygonDeleteOverlay = null; }
+/* ================= 다각형 ================= */
+function togglePolygonMode(){
+  polygonMode=!polygonMode;
+  if(polygonMode && drawEnabled) toggleDraw();
+  polyToggleBtn.innerText=polygonMode?'다각형 모드 ON':'다각형 모드 OFF';
 }
 
-// 다각형 UI 생성 (면적 + 중앙 삭제 버튼)
-function showPolygonUI(path) {
-  if (!polygon || !path || path.length < 3) return;
+function handlePolygonClick(pos){
+  if(!polyDrawing){
+    clearPolygon();
+    polyDrawing=true;
+    polyDraft=new kakao.maps.Polygon({map,path:[pos],strokeWeight:3,strokeColor:'#00a0e9',fillOpacity:0.2});
+    polygon=new kakao.maps.Polygon({path:[pos],strokeWeight:3,strokeColor:'#00a0e9',fillOpacity:0.2});
+  }else{
+    polyDraft.getPath().push(pos);
+    polygon.getPath().push(pos);
+  }
+}
 
-  // 면적 계산
-  var area = Math.round(polygon.getArea());
+function finishPolygon(){
+  if(polyDraft) polyDraft.setMap(null);
+  polyDraft=null;
+  polyDrawing=false;
 
-  // 면적 오버레이 (완전 비인터랙티브)
-  var infoDiv = document.createElement('div');
-  infoDiv.className = 'info';
-  infoDiv.style.pointerEvents = 'none';
-  infoDiv.style.cursor = 'default';
-  infoDiv.innerHTML = '총면적 <span class="number">' + area + '</span> m<sup>2</sup>';
-
-  if (areaOverlay) { areaOverlay.setMap(null); areaOverlay = null; }
-  areaOverlay = new kakao.maps.CustomOverlay({
-    map: map,
-    content: infoDiv,
-    xAnchor: 0,
-    yAnchor: 0,
-    position: path[path.length - 1]
-  });
-
-  // 중심 좌표 계산
-  if (polygonDeleteOverlay) { polygonDeleteOverlay.setMap(null); polygonDeleteOverlay = null; }
-  var bounds = new kakao.maps.LatLngBounds();
-  path.forEach(function(p){ bounds.extend(p); });
-  var center = bounds.getCenter();
-
-  // 삭제 박스 생성 (원 반경 UI와 동일 스타일)
-  var delContent = document.createElement('div');
-  delContent.className = 'radius-ui';
-  delContent.innerHTML = '다각형 삭제 <button type="button">✕</button>';
-  delContent.style.cursor = 'pointer';
-  delContent.addEventListener('click', function(){
+  if(polygon.getPath().length<3){
     clearPolygon();
     saveState();
-  });
-
-  polygonDeleteOverlay = new kakao.maps.CustomOverlay({
-    map: map,
-    content: delContent,
-    position: center,
-    yAnchor: 1
-  });
-}
-
-// 지도 클릭: 다각형 그리기 시작/연장 (원 그리기와 공존 방지)
-kakao.maps.event.addListener(map, 'click', function(mouseEvent){
-  if (!polygonModeEnabled) return;   // 모드 꺼져 있으면 무시
-  if (drawingFlag) return;           // 원 그리기 중이면 무시
-
-  var clickPosition = mouseEvent.latLng;
-
-  if (!polyDrawing) {
-    polyDrawing = true;
-
-    // 이전 다각형/오버레이 제거
-    clearPolygon();
-
-    // 임시 다각형 (마우스 따라다니는 선)
-    polyDraft = new kakao.maps.Polygon({
-      map: map,
-      path: [clickPosition],
-      strokeWeight: 3,
-      strokeColor: '#00a0e9',
-      strokeOpacity: 1,
-      strokeStyle: 'solid',
-      fillColor: '#00a0e9',
-      fillOpacity: 0.2
-    });
-
-    // 완성될 실제 다각형
-    polygon = new kakao.maps.Polygon({
-      path: [clickPosition],
-      strokeWeight: 3,
-      strokeColor: '#00a0e9',
-      strokeOpacity: 1,
-      strokeStyle: 'solid',
-      fillColor: '#00a0e9',
-      fillOpacity: 0.2
-    });
-
-  } else {
-    // 경로에 좌표 추가
-    var draftPath = polyDraft.getPath();
-    draftPath.push(clickPosition);
-    polyDraft.setPath(draftPath);
-
-    var path = polygon.getPath();
-    path.push(clickPosition);
-    polygon.setPath(path);
-  }
-});
-
-// 마우스무브: 임시 다각형의 마지막 꼭짓점을 마우스 위치로 이동
-kakao.maps.event.addListener(map, 'mousemove', function(mouseEvent){
-  if (!polyDrawing || !polyDraft) return;
-
-  var mousePosition = mouseEvent.latLng;
-  var path = polyDraft.getPath();
-
-  if (path.length > 1) path.pop();
-  path.push(mousePosition);
-  polyDraft.setPath(path);
-});
-
-// 우클릭: 다각형 그리기 종료 + UI 생성 + 저장
-kakao.maps.event.addListener(map, 'rightclick', function(){
-  if (!polyDrawing) return;
-
-  if (polyDraft) { polyDraft.setMap(null); polyDraft = null; }
-
-  if (polygon) {
-    var path = polygon.getPath();
-    if (path.length > 2) {
-      polygon.setMap(map);
-      showPolygonUI(path);
-      saveState();
-    } else {
-      clearPolygon();
-      saveState();
-    }
+    return;
   }
 
-  polyDrawing = false;
-});
-
-// ===== 기능 토글 함수들 =====
-function togglePolygonMode() {
-  polygonModeEnabled = !polygonModeEnabled;
-
-  // 다각형 모드가 켜지면 원 반경 드로잉은 자동 OFF
-  if (polygonModeEnabled && drawEnabled) {
-    drawEnabled = false;
-    drawBtn.innerText = '반경 그리기 OFF';
-  }
-
-  var btn = document.getElementById('polyToggleBtn');
-  if (btn) btn.innerText = polygonModeEnabled ? '다각형 모드 ON' : '다각형 모드 OFF';
-}
-
-// 원(circle) + 다각형 상태 저장/복원 (localStorage)
-function saveState() {
-  var state = {
-    circles: circles.map(function(c){
-      return {
-        id: c.id,
-        lat: c.circle.getPosition().getLat(),
-        lng: c.circle.getPosition().getLng(),
-        r: c.circle.getRadius()
-      };
-    }),
-    polygon: null
-  };
-
-  if (polygon && polygon.getPath) {
-    var path = polygon.getPath();
-    if (path && path.length > 2) {
-      state.polygon = path.map(function(p){
-        return { lat: p.getLat(), lng: p.getLng() };
-      });
-    }
-  }
-
-  localStorage.setItem('mapState', JSON.stringify(state));
-}
-
-function restorePolygonFromState(pathCoords) {
-  if (!pathCoords || !Array.isArray(pathCoords) || pathCoords.length < 3) return;
-
-  clearPolygon();
-
-  var path = pathCoords.map(function(d){
-    return new kakao.maps.LatLng(d.lat, d.lng);
-  });
-
-  polygon = new kakao.maps.Polygon({
-    path: path,
-    strokeWeight: 3,
-    strokeColor: '#00a0e9',
-    strokeOpacity: 1,
-    strokeStyle: 'solid',
-    fillColor: '#00a0e9',
-    fillOpacity: 0.2
-  });
   polygon.setMap(map);
-
-  showPolygonUI(path);
+  showPolygonDelete();
+  saveState();
 }
 
-function loadState() {
-  try {
-    var raw = localStorage.getItem('mapState');
-    if (!raw) return;
-    var state = JSON.parse(raw);
+function showPolygonDelete(){
+  const bounds=new kakao.maps.LatLngBounds();
+  polygon.getPath().forEach(p=>bounds.extend(p));
+  const center=bounds.getCenter();
 
-    // 원 초기화
-    circles.forEach(function(c){
-      c.circle.setMap(null);
-      c.overlay.setMap(null);
+  const box=document.createElement('div');
+  box.className='radius-ui';
+  box.innerHTML='다각형 삭제 <button>✕</button>';
+  box.onclick=()=>{ clearPolygon(); saveState(); };
+
+  polyDeleteOverlay=new kakao.maps.CustomOverlay({
+    map,
+    position:center,
+    content:box,
+    yAnchor:1
+  });
+}
+
+function clearPolygon(){
+  if(polygon) polygon.setMap(null);
+  if(polyDraft) polyDraft.setMap(null);
+  if(polyDeleteOverlay) polyDeleteOverlay.setMap(null);
+  polygon=polyDraft=polyDeleteOverlay=null;
+}
+
+/* ================= 저장 ================= */
+function saveState(){
+  localStorage.setItem('mapState',JSON.stringify({
+    circles:circles.map(c=>({
+      id:c.id,
+      lat:c.circle.getPosition().getLat(),
+      lng:c.circle.getPosition().getLng(),
+      r:c.circle.getRadius()
+    })),
+    polygon:polygon?polygon.getPath().map(p=>({lat:p.getLat(),lng:p.getLng()})):null
+  }));
+}
+
+(function load(){
+  const s=JSON.parse(localStorage.getItem('mapState')||'{}');
+  if(s.circles) s.circles.forEach(d=>{
+    createCircle(new kakao.maps.LatLng(d.lat,d.lng),d.r,d.id);
+    circleId=Math.max(circleId,d.id+1);
+  });
+  if(s.polygon && s.polygon.length>2){
+    polygon=new kakao.maps.Polygon({
+      map,
+      path:s.polygon.map(p=>new kakao.maps.LatLng(p.lat,p.lng)),
+      strokeWeight:3,
+      strokeColor:'#00a0e9',
+      fillOpacity:0.2
     });
-    circles = [];
-
-    // 원 복원
-    if (state.circles && Array.isArray(state.circles)) {
-      state.circles.forEach(function(d){
-        createCircle(new kakao.maps.LatLng(d.lat, d.lng), d.r, d.id);
-        if (typeof d.id === 'number' && d.id >= circleIdCounter) {
-          circleIdCounter = d.id + 1;
-        }
-      });
-    }
-
-    // 다각형 복원
-    if (state.polygon) restorePolygonFromState(state.polygon);
-  } catch(e) {
-    console.error('저장된 상태 불러오기 오류:', e);
+    showPolygonDelete();
   }
-}
-
-// 초기 로딩 시 상태 복원
-loadState();
+})();
 </script>
-
 </body>
 </html>
